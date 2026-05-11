@@ -1,5 +1,4 @@
 CC = gcc
-# Added -I. to ensure it finds your local headers like vtring.h
 CFLAGS = -m32 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables -nostdlib -I.
 ASM = nasm
 LD = ld
