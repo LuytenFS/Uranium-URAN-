@@ -121,7 +121,7 @@ char to_upper(char c){
   return c;
 }
 
-void set_idt_gate(int n, unsigned int handler);
+void set_idt_gate(int n, unsigned long handler);
 
     void idt_load() {
   __asm__ volatile("lidt (%0)" : : "r" (&idtp));
@@ -129,25 +129,25 @@ void set_idt_gate(int n, unsigned int handler);
 
     void init_idt() {
       idtp.limit = (sizeof(struct idt_entry) * 256) - 1;
-      idtp.base = (unsigned int)(unsigned long int)&idt;
+      idtp.base = (unsigned long int)&idt;
 
-      // Clear everything
       for (int i = 0; i < 256; i++) {
-        idt[i].type_attr = 0; // "Not Present"
+        idt[i].type_attr = 0;
       }
 
-      // Only hook the keyboard
-      set_idt_gate(33, (unsigned int)(unsigned long int)keyboard_handler_asm);
+      set_idt_gate(33, (unsigned long int)keyboard_handler_asm);
 
       idt_load();
     }
 
-void set_idt_gate(int n, unsigned int handler){
-  idt[n].offset_low = handler & 0xFFFF;
-  idt[n].selector = 0x08;
-  idt[n].zero = 0;
-  idt[n].type_attr = 0x8E;
-  idt[n].offset_high = (handler >> 16) & 0xFFFF;
+void set_idt_gate(int n, unsigned long handler) {
+  idt[n].offset_low = (unsigned short)(handler & 0xFFFF);
+  idt[n].selector = 0x08; // Your GDT64 Code Segment
+  idt[n].ist = 0;
+  idt[n].type_attr = 0x8E; // 64-bit Interrupt Gate, Present, Ring 0
+  idt[n].offset_mid = (unsigned short)((handler >> 16) & 0xFFFF);
+  idt[n].offset_high = (unsigned int)((handler >> 32) & 0xFFFFFFFF);
+  idt[n].reserved = 0; // The new 32-bit reserved field
 }
 
 // A simplified US-QWERTY layout
