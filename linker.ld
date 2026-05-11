@@ -8,7 +8,7 @@ SECTIONS
     {
         *(.text._start)
         *(.text)
-        *(.rodata*) /* Include strings and constants! */
+        *(.rodata*)
     }
 
     .data : 
@@ -22,6 +22,5 @@ SECTIONS
         *(.bss)
     }
 
-    /* This creates a marker for the end of the kernel */
     _end = .;
 }
