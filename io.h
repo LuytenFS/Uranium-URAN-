@@ -3,8 +3,6 @@
 
 /**
  * Send a byte to a specific I/O port.
- * 'val' goes into the EAX register ("a")
- * 'port' goes into the EDX register ("d")
  */
 static inline void outb(unsigned short port, unsigned char val) 
 {
@@ -13,8 +11,6 @@ static inline void outb(unsigned short port, unsigned char val)
 
 /**
  * Send a word to a specific I/O port.
- * 'val' goes into the EAX register ("a")
- * 'port' goes into the EDX register ("d")
  */
 static inline void outw(unsigned short port, unsigned short data) {
   __asm__ volatile("outw %1, %0" : : "dN"(port), "a"(data));
