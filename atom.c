@@ -23,7 +23,7 @@ void atom_main(){
             cursor_x = 0;
             cursor_y = 0;
           } else if (astrcmp((char *)atom_buffer, "ver") == 0) {
-            vga_print_string("\nURAN Kernel v0.01 - 2026\n");
+            vga_print_string(KERNEL_VER);
           } else if (astrcmp((char *)atom_buffer, "exit") == 0){
             vga_print_string("\nShutting down...\n");
             shutdown();

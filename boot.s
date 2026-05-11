@@ -4,7 +4,10 @@
 KERNEL_OFFSET equ 0x1000
 
 start:
-    mov [BOOT_DRIVE], dl
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov [BOOT_DRIVE], dl  
     
     ; 1. Reset Disk System
     mov ah, 0
@@ -15,7 +18,7 @@ start:
     mov es, ax
     mov bx, KERNEL_OFFSET
     mov ah, 0x02
-    mov al, 15              
+    mov al, 50              
     mov ch, 0x00
     mov dh, 0x00
     mov cl, 0x02
@@ -82,6 +85,13 @@ init_pm:
 
 [bits 64]
 init_lm:
+    mov ax, DATA_SEG64
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
     mov rsp, 0x90000              
     call KERNEL_OFFSET            
     jmp $
@@ -118,6 +128,7 @@ gdt64_descriptor:
 
 CODE_SEG32 equ gdt32_code - gdt32_start
 DATA_SEG32 equ gdt32_data - gdt32_start
+DATA_SEG64 equ gdt64_data - gdt64_start
 CODE_SEG64 equ gdt64_code - gdt64_start
 
 disk_error:

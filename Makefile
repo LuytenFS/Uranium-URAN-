@@ -2,18 +2,20 @@ CC = gcc
 AS = nasm
 LD = ld
 CFLAGS = -m64 -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -fno-pie -mcmodel=kernel -mno-red-zone
-LDFLAGS = -m elf_x86_64 -T linker.ld --oformat binary
+LDFLAGS = -m elf_x86_64 -T linker.ld
 
 all: uran_img.bin
 
 uran_img.bin: boot.bin kernel.bin
 	cat boot.bin kernel.bin > uran_img.bin
+	truncate -s +50K uran_img.bin
 
 boot.bin: boot.s
 	$(AS) -f bin boot.s -o boot.bin
 
 kernel.bin: kernel.o atom.o interrupt.o
-	$(LD) $(LDFLAGS) -o kernel.bin kernel.o atom.o interrupt.o
+	$(LD) $(LDFLAGS) -o kernel.elf kernel.o atom.o interrupt.o
+	objcopy -O binary kernel.elf kernel.bin
 
 interrupt.o: interrupt.s
 	$(AS) -f elf64 interrupt.s -o interrupt.o

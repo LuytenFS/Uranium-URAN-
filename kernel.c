@@ -1,6 +1,24 @@
 #include "io.h"
 #include "idt.h"
 #include "kernel.h"
+#include "types.h"
+
+#define LAPIC_SVR 0x0F0
+#define LAPIC_APIC_BASE_MSR 0x1B
+
+void init_apic(){
+  U32 lo, hi;
+  cpuGetMSR(LAPIC_APIC_BASE_MSR, &lo, &hi);
+
+  UINPTR apic_base = (lo & 0xfffff000);
+
+  lo |= (1 << 11);
+  cpuSetMSR(LAPIC_APIC_BASE_MSR, lo, hi);
+
+  UINPTR svr_val = mmio_read(apic_base + LAPIC_SVR);
+  svr_val |= (1 << 8) | 0xFF;
+  mmio_write(apic_base + LAPIC_SVR, svr_val);
+}
 
 struct idt_entry idt[256];
 struct idt_ptr idtp;
@@ -142,12 +160,12 @@ void set_idt_gate(int n, unsigned long handler);
 
 void set_idt_gate(int n, unsigned long handler) {
   idt[n].offset_low = (unsigned short)(handler & 0xFFFF);
-  idt[n].selector = 0x08; // Your GDT64 Code Segment
+  idt[n].selector = 0x08;
   idt[n].ist = 0;
   idt[n].type_attr = 0x8E; // 64-bit Interrupt Gate, Present, Ring 0
   idt[n].offset_mid = (unsigned short)((handler >> 16) & 0xFFFF);
   idt[n].offset_high = (unsigned int)((handler >> 32) & 0xFFFFFFFF);
-  idt[n].reserved = 0; // The new 32-bit reserved field
+  idt[n].reserved = 0; // 32-bit reserved field
 }
 
 // A simplified US-QWERTY layout
@@ -241,7 +259,7 @@ void __attribute__((section(".text._start"))) _start()
 
     init_idt();
 
-    pic_remap();
+    // pic_remap(); < we disable this for now
 
     set_idt_gate(33, (unsigned int)(unsigned long)keyboard_handler_asm);
 
