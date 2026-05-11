@@ -7,7 +7,7 @@ struct idt_entry {
   unsigned char zero;         // Reserved/Zero (Top box, bits 0..7)
   unsigned char type_attr;    // Flags/Attributes (Top box, bits 8..15)
   unsigned short offset_high; // Offset bits 16..31 (Top box, left side)
-} __attribute__((packed));    // CRITICAL: See below
+} __attribute__((packed));
 
 
 struct idt_ptr{
