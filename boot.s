@@ -149,3 +149,5 @@ disk_error:
 BOOT_DRIVE db 0
 times 510-($-$$) db 0
 dw 0xaa55
+
+section .note.GNU-stack noalloc noexec nowrite progbits

@@ -21,6 +21,35 @@ volatile int command_rdy = 0;
 extern void keyboard_handler_asm();
 extern void spurious_handler_asm();
 static unsigned char last_scancode = 0;
+U8 current_term_color = 0x09;
+
+void safe_print(char *str) {
+  if (cursor_y < 28) {
+    cursor_y = 28;
+  }
+  vga_print_string(str);
+}
+
+void vga_print_char(char c) {
+  struct vga_char *buffer = (struct vga_char *)0xB8000;
+
+  if (cursor_y >= 25) {
+    cls_screen();
+    cursor_x = 0;
+    cursor_y = 0;
+  }
+
+  int offset = cursor_y * 80 + cursor_x;
+  buffer[offset].character = c;
+  buffer[offset].style = current_term_color; 
+
+  cursor_x++;
+  if (cursor_x >= 80) {
+    cursor_x = 0;
+    cursor_y++;
+  }
+  update_cursor(cursor_x, cursor_y);
+}
 
 void init_apic() {
   U32 lo, hi;
@@ -67,33 +96,44 @@ void update_cursor(int x, int y) {
   outb(0x3D5, (unsigned char)(pos & 0xFF));
 }
 
-void vga_print_char(char c) {
-  struct vga_char *buffer = (struct vga_char *)0xB8000;
-
-  // Print at the current cursor position
-  int offset = cursor_y * 80 + cursor_x;
-  buffer[offset].character = c;
-  buffer[offset].style = 0x0A; // Bright Green for URAN
-
-  cursor_x++;
-  if (cursor_x >= 80) { // Simple line wrapping
-    cursor_x = 0;
-    cursor_y++;
-  }
-  update_cursor(cursor_x, cursor_y);
-}
-
-void vga_print_string(char *str){
-  for (int i = 0; str[i] != '\0'; i++){
-    if(str[i] == '\n'){
+void vga_print_string(char *str) {
+  for (int i = 0; str[i] != '\0'; i++) {
+    if (str[i] == '\n') {
       cursor_x = 0;
       cursor_y++;
     } else {
-      vga_print_char(str[i]);
-    }
+      // Manually placing the char to handle scrolling logic before printing
+      if (cursor_x >= 80) {
+        cursor_x = 0;
+        cursor_y++;
+      }
 
-    if(cursor_y >= 25){
-      cursor_y = 0;
+      // Perform the scroll if we hit the 25-line limit
+      if (cursor_y >= 25) {
+        struct vga_char *buffer = (struct vga_char *)0xB8000;
+
+        // Shift lines 1-24 up to lines 0-23
+        for (int y = 0; y < 24; y++) {
+          for (int x = 0; x < 80; x++) {
+            buffer[y * 80 + x] = buffer[(y + 1) * 80 + x];
+          }
+        }
+
+        // Clear the bottom line (Line 24) with the current theme color
+        for (int x = 0; x < 80; x++) {
+          buffer[24 * 80 + x].character = ' ';
+          buffer[24 * 80 + x].style = current_term_color;
+        }
+
+        cursor_y = 24; // Stay on the bottom line
+      }
+
+      // Now safely print the character
+      struct vga_char *buffer = (struct vga_char *)0xB8000;
+      int offset = cursor_y * 80 + cursor_x;
+      buffer[offset].character = str[i];
+      buffer[offset].style = current_term_color;
+      cursor_x++;
     }
   }
   update_cursor(cursor_x, cursor_y);
@@ -271,13 +311,11 @@ void shutdown() {
   }
 }
 
-void cls_screen()
-{
-  struct vga_char* buffer = (struct vga_char*)0xB8000;
-  for (int i = 0; i < 80 * 25; i++)
-  {
+void cls_screen() {
+  struct vga_char *buffer = (struct vga_char *)0xB8000;
+  for (int i = 0; i < 80 * 25; i++) {
     buffer[i].character = ' ';
-    buffer[i].style = 0x07; // gray on black
+    buffer[i].style = current_term_color; // Match the new background/foreground
   }
 }
 
