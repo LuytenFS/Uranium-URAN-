@@ -24,7 +24,6 @@ start:
     mov cl, 0x02
     mov dl, [BOOT_DRIVE]
     int 0x13
-
     jc disk_error
 
     ; 3. Transition to 32-bit Protected Mode
@@ -43,43 +42,58 @@ init_pm:
     mov ss, ax
     mov es, ax
 
-    ; --- Set up Paging (Identity map first 2MB) ---
-    mov edi, 0x10000
+    ; --- Set up Paging ---
+    ; We move tables to 0x70000 to avoid overwriting a large kernel
+    %define PML4_ADDR 0x70000
+    %define PDPT_ADDR 0x71000
+    %define PDT_ADDR  0x72000
+
+    mov edi, PML4_ADDR
     xor eax, eax
-    mov ecx, 4096
+    mov ecx, 3072             ; Clear 12KB
     rep stosd
 
-    mov edi, 0x10000
-    mov dword [edi], 0x11003      
-    mov dword [edi + 0x1000], 0x12003
-    mov dword [edi + 0x2000], 0x13003
-    
-    mov edi, 0x13000
-    mov ebx, 0x00000003           
-    mov ecx, 512
-.map_loop:
-    mov [edi], ebx
-    add ebx, 0x1000
-    add edi, 8
-    loop .map_loop
+    ; 1. PML4 -> PDPT
+    mov eax, PDPT_ADDR | 0x03 ; Present + Writable
+    mov [PML4_ADDR], eax
 
-    ; --- Enable PAE and Long Mode ---
-    mov eax, 0x10000
-    mov cr3, eax                  
+    ; 2. PDPT -> PDT
+    ; Map entry 0 (0-1GB) and entry 3 (3-4GB)
+    mov eax, PDT_ADDR | 0x03      
+    mov [PDPT_ADDR], eax        ; Entry 0
+    mov [PDPT_ADDR + 24], eax    ; Entry 3 (3 * 8 bytes)
+
+    ; 3. PDT -> 2MB Huge Pages
+    ; Entry 0: Identity maps 0.0MB to 2.0MB
+    mov eax, 0x00000083       ; Huge + Writable + Present
+    mov [PDT_ADDR], eax
+
+    ; Entry 502: Map 0xFEC00000 range (I/O APIC) 
+    ; 0x18 = PCD (Cache Disable) + PWT (Write Through) - Essential for MMIO
+    mov eax, 0xFEC0009B       ; Huge + Writable + Present + PCD + PWT
+    mov [PDT_ADDR + (502 * 8)], eax
+
+    ; Entry 503: Map 0xFEE00000 range (Local APIC)
+    mov eax, 0xFEE0009B
+    mov [PDT_ADDR + (503 * 8)], eax
+
+    ; --- Enable Long Mode ---
+    mov eax, PML4_ADDR
+    mov cr3, eax
+
     mov eax, cr4
-    or eax, 1 << 5                
+    or eax, 1 << 5            ; PAE
     mov cr4, eax
 
-    mov ecx, 0xC0000080           
+    mov ecx, 0xC0000080
     rdmsr
-    or eax, 1 << 8                
+    or eax, 1 << 8            ; LME
     wrmsr
 
     mov eax, cr0
-    or eax, 1 << 31               
+    or eax, 0x80000001        ; PG + PE
     mov cr0, eax
 
-    ; --- Jump to 64-bit Code ---
     lgdt [gdt64_descriptor]
     jmp CODE_SEG64:init_lm
 
@@ -92,13 +106,12 @@ init_lm:
     mov gs, ax
     mov ss, ax
 
-    mov rsp, 0x90000              
-    call KERNEL_OFFSET            
+    ; Place stack at 0x90000 (Safe from kernel and page tables)
+    mov rsp, 0x90000          
+    call KERNEL_OFFSET        
     jmp $
 
 ; --- GDT Structures ---
-
-; 32-bit GDT (Used for the initial jump)
 gdt32_start:
     dq 0x0
 gdt32_code: 
@@ -113,7 +126,6 @@ gdt32_descriptor:
     dw gdt32_end - gdt32_start - 1
     dd gdt32_start
 
-; 64-bit GDT (Used for Long Mode)
 gdt64_start:
     dq 0x0
 gdt64_code:
@@ -135,6 +147,5 @@ disk_error:
     jmp $
 
 BOOT_DRIVE db 0
-
 times 510-($-$$) db 0
 dw 0xaa55

@@ -39,3 +39,10 @@ keyboard_handler_asm:
     pop rax
 
     iretq    ; 64-bit Interrupt Return
+
+global spurious_handler_asm
+
+spurious_handler_asm:
+    ; Spurious interrupts don't usually push an error code,
+    ; and we don't need to save registers if we aren't calling C.
+    iretq

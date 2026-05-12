@@ -1,12 +1,13 @@
 CC = gcc
 AS = nasm
 LD = ld
-CFLAGS = -m64 -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -fno-pie -mcmodel=kernel -mno-red-zone
+CFLAGS = -m64 -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -fno-pie -mcmodel=small -mno-red-zone
 LDFLAGS = -m elf_x86_64 -T linker.ld
 
 all: uran_img.bin
 
 uran_img.bin: boot.bin kernel.bin
+	rm -f uran_img.bin
 	cat boot.bin kernel.bin > uran_img.bin
 	truncate -s +50K uran_img.bin
 
@@ -30,4 +31,4 @@ run: all
 	qemu-system-x86_64 -drive format=raw,file=uran_img.bin
 
 clean:
-	rm -f *.bin *.o uran_img.bin
+	rm -f *.bin *.o *.elf uran_img.bin
