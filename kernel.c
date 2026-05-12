@@ -214,7 +214,7 @@ void keyboard_handler_main() {
   }
   last_scancode = scancode;
   if (scancode & 0x80) {
-    last_scancode = 0; // Reset on release so you can press the same key again
+    last_scancode = 0;
     unsigned char release_code = scancode & 0x7F;
     if (release_code == 0x2A || release_code == 0x36)
       shift_pressed = 0;
@@ -236,6 +236,7 @@ void keyboard_handler_main() {
   }
 }
 
+/* old PIC logic, possibly may be reutilized for legacy hardware releases of URAN
 void pic_remap() {
   outb(0x20, 0x11);
   outb(0xA0, 0x11);
@@ -251,6 +252,7 @@ void pic_remap() {
   outb(0x21, 0xFD);
   outb(0xA1, 0xFF); // Disable all slave interrupts
 }
+*/
 
 void disable_pic() {
   outb(0x21, 0xFF);
@@ -326,7 +328,6 @@ void __attribute__((section(".text._start"))) _start() {
   set_keyboard_rate();
   
   // 6. Final Prep
-  vga_print_string("URAN: 64-bit Pure APIC Mode.\n");
   __asm__ volatile("sti"); // Enable interrupts now that setup is done
 
   // 7. Enter ATOM

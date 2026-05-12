@@ -6,7 +6,7 @@ struct vga_char {
   char style;
 };
 
-#define KERNEL_VER "\nURAN Kernel v0.20 X86_64 - 2026\n"
+#define KERNEL_VER "\nURAN Kernel v0.30 X86_64 - 2026\n"
 
 extern int shift_pressed;
 extern int caps_lock;
