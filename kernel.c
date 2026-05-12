@@ -1,6 +1,13 @@
 #include "io.h"
 #include "idt.h"
 #include "kernel.h"
+#include "types.h"
+#include "atomf.h"
+
+#define LAPIC_SVR 0x0F0
+#define LAPIC_APIC_BASE_MSR 0x1B
+#define IOAPIC_REGSEL 0x00
+#define IOAPIC_IOWIN 0x10
 
 struct idt_entry idt[256];
 struct idt_ptr idtp;
@@ -12,6 +19,41 @@ volatile char atom_buffer[256];
 volatile int buffer_idx = 0;
 volatile int command_rdy = 0;
 extern void keyboard_handler_asm();
+extern void spurious_handler_asm();
+static unsigned char last_scancode = 0;
+
+void init_apic() {
+  U32 lo, hi;
+  cpuGetMSR(LAPIC_APIC_BASE_MSR, &lo, &hi);
+
+  UINPTR apic_base = (lo & 0xfffff000);
+
+  lo |= (1 << 11);
+  cpuSetMSR(LAPIC_APIC_BASE_MSR, lo, hi);
+
+  UINPTR svr_val = mmio_read(apic_base + LAPIC_SVR);
+  svr_val |= (1 << 8) | 0xFF;
+  mmio_write(apic_base + LAPIC_SVR, svr_val);
+}
+
+void ioapic_write(UINPTR base, U32 reg, U32 data) {
+  mmio_write(base + IOAPIC_REGSEL, reg);
+  mmio_write(base + IOAPIC_IOWIN, data);
+}
+
+void init_ioapic(UINPTR ioapic_base) {
+  U32 low = 33;
+
+  U32 high = 0; // Destination APIC ID 0
+
+  // Map Pin 1 (Standard Keyboard)
+  ioapic_write(ioapic_base, 0x12, low);
+  ioapic_write(ioapic_base, 0x13, high);
+
+  // Map Pin 2 (Common Redirected Keyboard)
+  ioapic_write(ioapic_base, 0x14, low);
+  ioapic_write(ioapic_base, 0x15, high);
+}
 
 void update_cursor(int x, int y) {
   unsigned short pos = y * 80 + x;
@@ -121,33 +163,34 @@ char to_upper(char c){
   return c;
 }
 
-void set_idt_gate(int n, unsigned int handler);
+void set_idt_gate(int n, unsigned long handler);
 
     void idt_load() {
   __asm__ volatile("lidt (%0)" : : "r" (&idtp));
 }
 
-    void init_idt() {
-      idtp.limit = (sizeof(struct idt_entry) * 256) - 1;
-      idtp.base = (unsigned int)(unsigned long int)&idt;
+void init_idt() {
+  idtp.limit = (sizeof(struct idt_entry) * 256) - 1;
+  idtp.base = (unsigned long int)&idt;
 
-      // Clear everything
-      for (int i = 0; i < 256; i++) {
-        idt[i].type_attr = 0; // "Not Present"
-      }
+  for (int i = 0; i < 256; i++) {
+    idt[i].type_attr = 0;
+  }
 
-      // Only hook the keyboard
-      set_idt_gate(33, (unsigned int)(unsigned long int)keyboard_handler_asm);
+  set_idt_gate(33, (unsigned long int)keyboard_handler_asm);
+  set_idt_gate(255, (unsigned long int)spurious_handler_asm);
 
-      idt_load();
-    }
+  idt_load();
+}
 
-void set_idt_gate(int n, unsigned int handler){
-  idt[n].offset_low = handler & 0xFFFF;
+void set_idt_gate(int n, unsigned long handler) {
+  idt[n].offset_low = (unsigned short)(handler & 0xFFFF);
   idt[n].selector = 0x08;
-  idt[n].zero = 0;
-  idt[n].type_attr = 0x8E;
-  idt[n].offset_high = (handler >> 16) & 0xFFFF;
+  idt[n].ist = 0;
+  idt[n].type_attr = 0x8E; // 64-bit Interrupt Gate, Present, Ring 0
+  idt[n].offset_mid = (unsigned short)((handler >> 16) & 0xFFFF);
+  idt[n].offset_high = (unsigned int)((handler >> 32) & 0xFFFFFFFF);
+  idt[n].reserved = 0; // 32-bit reserved field
 }
 
 // A simplified US-QWERTY layout
@@ -164,39 +207,36 @@ unsigned char kbd_map[128] = {
 };
 
 void keyboard_handler_main() {
+  mmio_write(0xFEE000B0, 0); // EOI
   unsigned char scancode = inb(0x60);
-
-  // Check if this is a "Break" code (key release)
-  if (scancode & 0x80) {
-    unsigned char release_code = scancode & 0x7F; // Remove the release bit
-
-    if (release_code == 0x2A || release_code == 0x36) { // Left or Right Shift
-      shift_pressed = 0;
-    }
+  if (scancode == last_scancode) {
+    return;
   }
-  // This is a "Make" code (key press)
-  else {
+  last_scancode = scancode;
+  if (scancode & 0x80) {
+    last_scancode = 0;
+    unsigned char release_code = scancode & 0x7F;
+    if (release_code == 0x2A || release_code == 0x36)
+      shift_pressed = 0;
+    return;
+  } else {
+    // KEY PRESS LOGIC
     if (scancode == 0x2A || scancode == 0x36) {
       shift_pressed = 1;
-    } else if (scancode == 0x3A) { // Caps Lock
+    } else if (scancode == 0x3A) {
       caps_lock = !caps_lock;
     } else {
       char c = kbd_map[scancode];
-
       if (c != 0) {
-        // Apply modifiers
-        if (shift_pressed ^ caps_lock) { // XOR: Shift OR Caps, but not both
+        if (shift_pressed ^ caps_lock)
           c = to_upper(c);
-        }
-
-        // Pass to ATOM's input logic
         process_input(c);
       }
     }
   }
-  outb(0x20, 0x20); // Acknowledge the interrupt to the PIC
 }
 
+/* old PIC logic, possibly may be reutilized for legacy hardware releases of URAN
 void pic_remap() {
   outb(0x20, 0x11);
   outb(0xA0, 0x11);
@@ -211,6 +251,12 @@ void pic_remap() {
   // This disables the Timer (Bit 0) but keeps the Keyboard (Bit 1) ON.
   outb(0x21, 0xFD);
   outb(0xA1, 0xFF); // Disable all slave interrupts
+}
+*/
+
+void disable_pic() {
+  outb(0x21, 0xFF);
+  outb(0xA1, 0xFF);
 }
 
 void shutdown() {
@@ -235,22 +281,61 @@ void cls_screen()
   }
 }
 
-void __attribute__((section(".text._start"))) _start()
-{
-    cls_screen(); // Clear the BIOS junk first
+UINPTR find_ioapic_address() {
+  // Search BIOS memory from 0xE0000 to 0xFFFFF for "RSD PTR "
+  for (char *p = (char *)0x000E0000; p < (char *)0x000FFFFF; p += 16) {
+    if (astrcmp_n(p, "RSD PTR ", 8) == 0) {
+      return 0xFEC00000;
+    }
+  }
+  return 0xFEC00000; // Fallback
+}
 
-    init_idt();
+void set_keyboard_rate() {
+  // 0xF3 is the 'Set Typematic Rate/Delay' command
+  while (inb(0x64) & 2)
+    ;
+  outb(0x60, 0xF3);
 
-    pic_remap();
+  while (inb(0x64) & 2)
+    ;
+  // 0x7F = 01111111b
+  // Bits 5-6 (11): 1000ms delay before repeating
+  // Bits 0-4 (11111): ~2.0 characters per second (slowest)
+  outb(0x60, 0x7F);
+}
 
-    set_idt_gate(33, (unsigned int)(unsigned long)keyboard_handler_asm);
+void __attribute__((section(".text._start"))) _start() {
+  cls_screen();
 
-    __asm__ volatile("sti");
+  // 1. Setup Interrupts
+  init_idt();
 
-    cursor_x = 0;
-    cursor_y = 0;
+  // 2. Setup Local APIC
+  init_apic();
 
-    extern void atom_main(); // Defined in atom.c
-    atom_main();
-    while(1); 
+  // 3. Setup I/O APIC (Hardcoded for now to match boot.s mapping)
+  UINPTR ioapic = 0xFEC00000;
+  init_ioapic(ioapic);
+
+  // 4. Switch from PIC to APIC
+  disable_pic();
+
+  // 5. Enable Keyboard Controller (8042)
+  while (inb(0x64) & 2);               // Wait for not busy
+  outb(0x64, 0xAE); // Enable keyboard port
+
+  set_keyboard_rate();
+  
+  // 6. Final Prep
+  __asm__ volatile("sti"); // Enable interrupts now that setup is done
+
+  // 7. Enter ATOM
+  extern void atom_main();
+  atom_main();
+
+  // Catch-all
+  while (1) {
+    __asm__ volatile("hlt");
+  }
 }
